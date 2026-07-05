@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"name": "image",
 	"displayName": "Image",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Generates Markdown descriptions for uploaded images.",
 	"artifact": "dist/bonobo.artifact.json"
 }

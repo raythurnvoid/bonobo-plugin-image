@@ -3,7 +3,7 @@
 	"plugin": {
 		"name": "image",
 		"displayName": "Image",
-		"version": "0.1.0"
+		"version": "0.1.1"
 	},
 	"compatibility": {
 		"bonoboPluginRuntime": "1"
@@ -26,8 +26,8 @@
 	"files": [
 		{
 			"path": "dist/backend/worker.js",
-			"sha256": "sha256:f71de070d5a92887e55d73924a6a1e2b5fcc2714ac0d243b1dc71ef3f92ca2f7",
-			"bytes": 4851,
+			"sha256": "sha256:5e8ad49aa91f243659d8a2014756f6f6b639d5bb60ff2a190906f3397675dce1",
+			"bytes": 4889,
 			"contentType": "application/javascript"
 		}
 	],

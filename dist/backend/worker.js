@@ -6,7 +6,7 @@ const OPENAI_RETRY_ATTEMPTS = 2;
 const OPENAI_RETRY_DELAY_MS = 1000;
 
 const IMAGE_SYSTEM_PROMPT =
-	"Describe uploaded images for an app file tree. Write useful, concrete Markdown for a reader who cannot see the image. Cover the main subjects, any visible text, the colors, and the layout, and call out uncertainty. Return raw Markdown without wrapping it in a code fence.";
+	"Describe uploaded images for an app file tree. Write useful, concrete Markdown for a reader who cannot see the image. Cover the main subjects, any visible text, the colors, and the layout, and call out uncertainty. Keep the description under 300 words. Return raw Markdown without wrapping it in a code fence.";
 
 function normalizeContentType(value) {
 	return typeof value === "string" ? value.split(";")[0].trim().toLowerCase() : null;
