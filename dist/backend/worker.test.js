@@ -1,39 +1,84 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import worker, { isSupportedImageContentType, openaiDescribeImageRequest } from "./worker.js";
+import worker, { isSupportedImageContentType } from "./worker.js";
 
+const HOST_API_ORIGIN = "https://host.test";
+const SOURCE_TEMPORARY_URL_API = `${HOST_API_ORIGIN}/api/plugins/v1/source-temporary-url`;
+const WRITE_MARKDOWN_API = `${HOST_API_ORIGIN}/api/plugins/v1/write-markdown`;
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const SIGNED_SOURCE_URL = "https://r2.test/photo.png?signed=1";
+
+/** @param {unknown} source */
 function uploadRequest(source) {
 	return new Request("https://plugin.test/event", {
 		method: "POST",
-		body: JSON.stringify({ event: "files.upload.completed", source }),
+		body: JSON.stringify({ event: "files.upload.completed", pluginRunId: "run-1", source }),
 	});
 }
 
+/** @param {{ secretGet?: () => Promise<string | null> }} [overrides] */
 function stubEnv(overrides = {}) {
 	return {
 		BONOBO: {
 			secrets: {
 				get: overrides.secretGet ?? vi.fn(async () => "sk-test"),
 			},
-			files: {
-				source: {
-					temporaryUrl: overrides.temporaryUrl ?? vi.fn(async () => ({ url: "https://r2.test/photo.png?signed=1" })),
-				},
-				writeMarkdown: overrides.writeMarkdown ?? vi.fn(async () => ({ ok: true })),
-			},
-			outbound: {
-				fetch:
-					overrides.outboundFetch ??
-					vi.fn(async () => ({
-						status: 200,
-						ok: true,
-						headers: { "Content-Type": "application/json" },
-						bodyText: JSON.stringify({ choices: [{ message: { content: "A red bicycle leaning on a wall." } }] }),
-					})),
-			},
+			host: { apiOrigin: HOST_API_ORIGIN, token: "run-token" },
 		},
 	};
 }
+
+/** @param {RequestInit} init */
+function capturedCall(init) {
+	return {
+		headers: /** @type {Record<string, string>} */ (init.headers),
+		body: JSON.parse(String(init.body)),
+	};
+}
+
+/** @param {{ openai?: () => Response }} [overrides] */
+function stubFetch(overrides = {}) {
+	/** @type {ReturnType<typeof capturedCall>[]} */
+	const temporaryUrlCalls = [];
+	/** @type {ReturnType<typeof capturedCall>[]} */
+	const writeMarkdownCalls = [];
+	/** @type {ReturnType<typeof capturedCall>[]} */
+	const openaiCalls = [];
+	const fetchMock = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
+		if (url === SOURCE_TEMPORARY_URL_API) {
+			temporaryUrlCalls.push(capturedCall(init));
+			return Response.json({ url: SIGNED_SOURCE_URL, expiresAt: Date.now() + 900_000 });
+		}
+		if (url === WRITE_MARKDOWN_API) {
+			writeMarkdownCalls.push(capturedCall(init));
+			return Response.json({ ok: true });
+		}
+		if (url === OPENAI_URL) {
+			openaiCalls.push(capturedCall(init));
+			return overrides.openai
+				? overrides.openai()
+				: Response.json({ choices: [{ message: { content: "A red bicycle leaning on a wall." } }] });
+		}
+		throw new Error(`Unexpected fetch URL: ${url}`);
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	return { fetchMock, temporaryUrlCalls, writeMarkdownCalls, openaiCalls };
+}
+
+/**
+ * @param {Request} request
+ * @param {ReturnType<typeof stubEnv>} env
+ */
+async function runWorker(request, env) {
+	if (!worker.fetch) {
+		throw new Error("worker.fetch is not defined");
+	}
+	return worker.fetch(/** @type {any} */ (request), env, /** @type {any} */ (null));
+}
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 describe("isSupportedImageContentType", () => {
 	it("accepts the four supported image content types and rejects others", () => {
@@ -46,75 +91,72 @@ describe("isSupportedImageContentType", () => {
 	});
 });
 
-describe("openaiDescribeImageRequest", () => {
-	it("builds a gpt-4.1-mini chat completion request pointing at the image URL", () => {
-		const request = openaiDescribeImageRequest({
-			apiKey: "sk-test",
-			sourceName: "photo.png",
-			imageUrl: "https://r2.test/photo.png?signed=1",
-		});
-
-		expect(request.url).toBe("https://api.openai.com/v1/chat/completions");
-		expect(request.method).toBe("POST");
-		expect(request.headers.Authorization).toBe("Bearer sk-test");
-		expect(request.headers["Content-Type"]).toBe("application/json");
-		expect(request.responseType).toBe("text");
-
-		const body = JSON.parse(request.bodyText);
-		expect(body.model).toBe("gpt-4.1-mini");
-		expect(body.messages[0].role).toBe("system");
-		expect(body.messages[1].role).toBe("user");
-		expect(body.messages[1].content).toEqual([
-			{ type: "text", text: expect.stringContaining("photo.png") },
-			{ type: "image_url", image_url: { url: "https://r2.test/photo.png?signed=1" } },
-		]);
-	});
-});
-
 describe("worker.fetch", () => {
 	it("skips uploads with unsupported content types without host calls", async () => {
+		const { fetchMock } = stubFetch();
 		const env = stubEnv();
 
-		const response = await worker.fetch(uploadRequest({ name: "report.pdf", contentType: "application/pdf" }), env);
+		const response = await runWorker(uploadRequest({ name: "report.pdf", contentType: "application/pdf" }), env);
 
 		expect(response.status).toBe(204);
 		expect(response.headers.get("X-Bonobo-Skipped")).toBe("unsupported_content_type");
 		expect(env.BONOBO.secrets.get).not.toHaveBeenCalled();
-		expect(env.BONOBO.outbound.fetch).not.toHaveBeenCalled();
-		expect(env.BONOBO.files.writeMarkdown).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it("fails without writing when the OPENAI_API_KEY secret is missing", async () => {
+		const { writeMarkdownCalls } = stubFetch();
 		const env = stubEnv({ secretGet: vi.fn(async () => null) });
 
-		await expect(worker.fetch(uploadRequest({ name: "photo.png", contentType: "image/png" }), env)).rejects.toThrow(
+		await expect(runWorker(uploadRequest({ name: "photo.png", contentType: "image/png" }), env)).rejects.toThrow(
 			"OPENAI_API_KEY secret is not configured",
 		);
-		expect(env.BONOBO.files.writeMarkdown).not.toHaveBeenCalled();
+		expect(writeMarkdownCalls).toHaveLength(0);
 	});
 
 	it("retries once on OpenAI 500 and then fails with the status only", async () => {
-		const env = stubEnv({
-			outboundFetch: vi.fn(async () => ({ status: 500, ok: false, headers: {}, bodyText: "internal error" })),
+		const { writeMarkdownCalls, openaiCalls } = stubFetch({
+			openai: () => new Response("internal error", { status: 500 }),
 		});
-
-		await expect(worker.fetch(uploadRequest({ name: "photo.png", contentType: "image/png" }), env)).rejects.toThrow(
-			"OpenAI image description returned HTTP 500",
-		);
-		expect(env.BONOBO.outbound.fetch).toHaveBeenCalledTimes(2);
-		expect(env.BONOBO.files.writeMarkdown).not.toHaveBeenCalled();
-	});
-
-	it("writes the description Markdown next to the upload on success", async () => {
 		const env = stubEnv();
 
-		const response = await worker.fetch(uploadRequest({ name: "photo.png", contentType: "image/png" }), env);
+		await expect(runWorker(uploadRequest({ name: "photo.png", contentType: "image/png" }), env)).rejects.toThrow(
+			"OpenAI image description returned HTTP 500",
+		);
+		expect(openaiCalls).toHaveLength(2);
+		expect(writeMarkdownCalls).toHaveLength(0);
+	});
+
+	it("requests the source URL, describes it with OpenAI, and writes the description", async () => {
+		const { temporaryUrlCalls, writeMarkdownCalls, openaiCalls } = stubFetch();
+		const env = stubEnv();
+
+		const response = await runWorker(uploadRequest({ name: "photo.png", contentType: "image/png" }), env);
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ ok: true, files: ["photo.png.description.md"] });
-		expect(env.BONOBO.files.writeMarkdown).toHaveBeenCalledWith({
-			path: "photo.png.description.md",
+
+		expect(temporaryUrlCalls).toHaveLength(1);
+		expect(temporaryUrlCalls[0].headers.Authorization).toBe("Bearer run-token");
+		expect(temporaryUrlCalls[0].body).toEqual({ pluginRunId: "run-1", expiresInSeconds: 900 });
+
+		expect(openaiCalls).toHaveLength(1);
+		expect(openaiCalls[0].headers.Authorization).toBe("Bearer sk-test");
+		expect(openaiCalls[0].headers["Content-Type"]).toBe("application/json");
+		expect(openaiCalls[0].body.model).toBe("gpt-4.1-mini");
+		expect(openaiCalls[0].body.messages[0].role).toBe("system");
+		expect(openaiCalls[0].body.messages[1].role).toBe("user");
+		expect(openaiCalls[0].body.messages[1].content).toEqual([
+			{ type: "text", text: expect.stringContaining("photo.png") },
+			{ type: "image_url", image_url: { url: SIGNED_SOURCE_URL } },
+		]);
+
+		expect(writeMarkdownCalls).toHaveLength(1);
+		expect(writeMarkdownCalls[0].headers.Authorization).toBe("Bearer run-token");
+		expect(writeMarkdownCalls[0].body).toEqual({
+			pluginRunId: "run-1",
 			markdown: "# Image description: photo.png\n\nA red bicycle leaning on a wall.",
+			path: "photo.png.description.md",
 			overwrite: "replace",
 		});
 	});
