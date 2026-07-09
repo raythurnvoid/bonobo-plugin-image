@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"name": "image",
 	"displayName": "Image",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Generates Markdown descriptions for uploaded images.",
 	"compatibility": {
 		"bonoboPluginRuntime": "1"
@@ -21,7 +21,7 @@
 	],
 	"pages": [],
 	"capabilities": ["plugin.secrets.read", "outbound.fetch"],
-	"outboundOrigins": ["https://api.openai.com"],
+	"outboundOrigins": ["https://api.openai.com", "https://api.mistral.ai"],
 	"files": [
 		{
 			"path": "dist/backend/worker.js",
