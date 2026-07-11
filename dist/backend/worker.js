@@ -1,4 +1,4 @@
-const TEMPORARY_URL_EXPIRES_SECONDS = 15 * 60;
+const DOWNLOAD_URL_EXPIRES_SECONDS = 15 * 60;
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_DESCRIPTION_MODEL = "gpt-4.1-mini";
 const OPENAI_MAX_OUTPUT_TOKENS = 900;
@@ -50,7 +50,13 @@ async function readEvent(request) {
 /** @param {import("bonobo-plugin-sdk").BonoboUploadCompletedEvent} event */
 function getSource(event) {
 	const source = event && typeof event === "object" ? event.source : null;
-	if (!source || typeof source !== "object" || typeof source.name !== "string") {
+	if (
+		!source ||
+		typeof source !== "object" ||
+		typeof source.fileNodeId !== "string" ||
+		typeof source.name !== "string" ||
+		typeof source.path !== "string"
+	) {
 		return null;
 	}
 
@@ -116,15 +122,15 @@ async function hostFetch(env, path, body) {
 
 /**
  * @param {import("bonobo-plugin-sdk").BonoboEnv} env
- * @param {string} pluginRunId
+ * @param {string} fileNodeId
  */
-async function sourceTemporaryUrl(env, pluginRunId) {
-	const result = await hostFetch(env, "/api/plugins/v1/source-temporary-url", {
-		pluginRunId,
-		expiresInSeconds: TEMPORARY_URL_EXPIRES_SECONDS,
+async function sourceDownloadUrl(env, fileNodeId) {
+	const result = await hostFetch(env, "/api/v1/files/download-url", {
+		fileNodeId,
+		expiresInSeconds: DOWNLOAD_URL_EXPIRES_SECONDS,
 	});
 	if (!result || typeof result.url !== "string") {
-		throw new Error("Source temporary URL is unavailable");
+		throw new Error("Source download URL is unavailable");
 	}
 	return result.url;
 }
@@ -194,18 +200,18 @@ export default {
 		}
 
 		const openaiKey = await requireSecret(env, "OPENAI_API_KEY");
-		const sourceUrl = await sourceTemporaryUrl(env, event.pluginRunId);
+		const sourceUrl = await sourceDownloadUrl(env, source.fileNodeId);
 		const description = await openaiDescribeImage({
 			apiKey: openaiKey,
 			sourceName: source.name,
 			imageUrl: sourceUrl,
 		});
 
-		const path = `${source.name}.description.md`;
-		await hostFetch(env, "/api/plugins/v1/write-markdown", {
-			pluginRunId: event.pluginRunId,
-			markdown: `# Image description: ${source.name}\n\n${description}`,
+		// Absolute sibling of the upload: /folder/photo.png -> /folder/photo.png.description.md.
+		const path = `${source.path}.description.md`;
+		await hostFetch(env, "/api/v1/files/write", {
 			path,
+			content: `# Image description: ${source.name}\n\n${description}`,
 			overwrite: "replace",
 		});
 

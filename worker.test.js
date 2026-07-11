@@ -1,18 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import worker, { isSupportedImageContentType } from "./worker.js";
+import worker, { isSupportedImageContentType } from "./dist/backend/worker.js";
 
 const HOST_API_ORIGIN = "https://host.test";
-const SOURCE_TEMPORARY_URL_API = `${HOST_API_ORIGIN}/api/plugins/v1/source-temporary-url`;
-const WRITE_MARKDOWN_API = `${HOST_API_ORIGIN}/api/plugins/v1/write-markdown`;
+const DOWNLOAD_URL_API = `${HOST_API_ORIGIN}/api/v1/files/download-url`;
+const FILES_WRITE_API = `${HOST_API_ORIGIN}/api/v1/files/write`;
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const SIGNED_SOURCE_URL = "https://r2.test/photo.png?signed=1";
 
-/** @param {unknown} source */
+/** @param {{ name: string, contentType: string }} source */
 function uploadRequest(source) {
 	return new Request("https://plugin.test/event", {
 		method: "POST",
-		body: JSON.stringify({ event: "files.upload.completed", pluginRunId: "run-1", source }),
+		body: JSON.stringify({
+			event: "files.upload.completed",
+			pluginRunId: "run-1",
+			source: {
+				fileNodeId: "node-1",
+				assetId: "asset-1",
+				path: `/uploads/${source.name}`,
+				size: 1234,
+				...source,
+			},
+		}),
 	});
 }
 
@@ -39,19 +49,20 @@ function capturedCall(init) {
 /** @param {{ openai?: () => Response }} [overrides] */
 function stubFetch(overrides = {}) {
 	/** @type {ReturnType<typeof capturedCall>[]} */
-	const temporaryUrlCalls = [];
+	const downloadUrlCalls = [];
 	/** @type {ReturnType<typeof capturedCall>[]} */
-	const writeMarkdownCalls = [];
+	const writeCalls = [];
 	/** @type {ReturnType<typeof capturedCall>[]} */
 	const openaiCalls = [];
 	const fetchMock = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
-		if (url === SOURCE_TEMPORARY_URL_API) {
-			temporaryUrlCalls.push(capturedCall(init));
-			return Response.json({ url: SIGNED_SOURCE_URL, expiresAt: Date.now() + 900_000 });
+		if (url === DOWNLOAD_URL_API) {
+			downloadUrlCalls.push(capturedCall(init));
+			return Response.json({ fileNodeId: "node-1", url: SIGNED_SOURCE_URL, expiresAt: Date.now() + 900_000 });
 		}
-		if (url === WRITE_MARKDOWN_API) {
-			writeMarkdownCalls.push(capturedCall(init));
-			return Response.json({ ok: true });
+		if (url === FILES_WRITE_API) {
+			const call = capturedCall(init);
+			writeCalls.push(call);
+			return Response.json({ path: call.body.path, nodeId: "node-2", contentType: "text/markdown;charset=utf-8" });
 		}
 		if (url === OPENAI_URL) {
 			openaiCalls.push(capturedCall(init));
@@ -62,7 +73,7 @@ function stubFetch(overrides = {}) {
 		throw new Error(`Unexpected fetch URL: ${url}`);
 	});
 	vi.stubGlobal("fetch", fetchMock);
-	return { fetchMock, temporaryUrlCalls, writeMarkdownCalls, openaiCalls };
+	return { fetchMock, downloadUrlCalls, writeCalls, openaiCalls };
 }
 
 /**
@@ -105,17 +116,17 @@ describe("worker.fetch", () => {
 	});
 
 	it("fails without writing when the OPENAI_API_KEY secret is missing", async () => {
-		const { writeMarkdownCalls } = stubFetch();
+		const { writeCalls } = stubFetch();
 		const env = stubEnv({ secretGet: vi.fn(async () => null) });
 
 		await expect(runWorker(uploadRequest({ name: "photo.png", contentType: "image/png" }), env)).rejects.toThrow(
 			"OPENAI_API_KEY secret is not configured",
 		);
-		expect(writeMarkdownCalls).toHaveLength(0);
+		expect(writeCalls).toHaveLength(0);
 	});
 
 	it("retries once on OpenAI 500 and then fails with the status only", async () => {
-		const { writeMarkdownCalls, openaiCalls } = stubFetch({
+		const { writeCalls, openaiCalls } = stubFetch({
 			openai: () => new Response("internal error", { status: 500 }),
 		});
 		const env = stubEnv();
@@ -124,21 +135,21 @@ describe("worker.fetch", () => {
 			"OpenAI image description returned HTTP 500",
 		);
 		expect(openaiCalls).toHaveLength(2);
-		expect(writeMarkdownCalls).toHaveLength(0);
+		expect(writeCalls).toHaveLength(0);
 	});
 
-	it("requests the source URL, describes it with OpenAI, and writes the description", async () => {
-		const { temporaryUrlCalls, writeMarkdownCalls, openaiCalls } = stubFetch();
+	it("requests the source download URL, describes it with OpenAI, and writes the sibling description", async () => {
+		const { downloadUrlCalls, writeCalls, openaiCalls } = stubFetch();
 		const env = stubEnv();
 
 		const response = await runWorker(uploadRequest({ name: "photo.png", contentType: "image/png" }), env);
 
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ ok: true, files: ["photo.png.description.md"] });
+		expect(await response.json()).toEqual({ ok: true, files: ["/uploads/photo.png.description.md"] });
 
-		expect(temporaryUrlCalls).toHaveLength(1);
-		expect(temporaryUrlCalls[0].headers.Authorization).toBe("Bearer run-token");
-		expect(temporaryUrlCalls[0].body).toEqual({ pluginRunId: "run-1", expiresInSeconds: 900 });
+		expect(downloadUrlCalls).toHaveLength(1);
+		expect(downloadUrlCalls[0].headers.Authorization).toBe("Bearer run-token");
+		expect(downloadUrlCalls[0].body).toEqual({ fileNodeId: "node-1", expiresInSeconds: 900 });
 
 		expect(openaiCalls).toHaveLength(1);
 		expect(openaiCalls[0].headers.Authorization).toBe("Bearer sk-test");
@@ -151,12 +162,11 @@ describe("worker.fetch", () => {
 			{ type: "image_url", image_url: { url: SIGNED_SOURCE_URL } },
 		]);
 
-		expect(writeMarkdownCalls).toHaveLength(1);
-		expect(writeMarkdownCalls[0].headers.Authorization).toBe("Bearer run-token");
-		expect(writeMarkdownCalls[0].body).toEqual({
-			pluginRunId: "run-1",
-			markdown: "# Image description: photo.png\n\nA red bicycle leaning on a wall.",
-			path: "photo.png.description.md",
+		expect(writeCalls).toHaveLength(1);
+		expect(writeCalls[0].headers.Authorization).toBe("Bearer run-token");
+		expect(writeCalls[0].body).toEqual({
+			path: "/uploads/photo.png.description.md",
+			content: "# Image description: photo.png\n\nA red bicycle leaning on a wall.",
 			overwrite: "replace",
 		});
 	});

@@ -1,11 +1,11 @@
 {
 	"name": "@bonobo/plugin-image",
 	"private": true,
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"type": "module",
 	"scripts": {
 		"build:manifest": "node scripts/build-manifest.mjs",
-		"lint": "eslint dist/**/*.js",
+		"lint": "eslint dist/**/*.js worker.test.js",
 		"typecheck": "tsc --noEmit",
 		"check": "pnpm run typecheck && pnpm run lint",
 		"test": "vitest run"

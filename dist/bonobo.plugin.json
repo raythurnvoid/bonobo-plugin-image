@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"name": "image",
 	"displayName": "Image",
-	"version": "0.2.1",
+	"version": "0.3.0",
 	"description": "Generates Markdown descriptions for uploaded images.",
 	"compatibility": {
 		"bonoboPluginRuntime": "1"
@@ -21,12 +21,12 @@
 	],
 	"pages": [],
 	"capabilities": ["plugin.secrets.read", "outbound.fetch"],
-	"outboundOrigins": ["https://api.openai.com", "https://api.mistral.ai"],
+	"outboundOrigins": ["https://api.openai.com"],
 	"files": [
 		{
 			"path": "dist/backend/worker.js",
-			"sha256": "sha256:436ccaae2f32b909c4a5988ed6526123d8cf4d3847eee9165b6504553921317f",
-			"bytes": 6235,
+			"sha256": "sha256:129285412f56ff23e7751206560a83fb65b228f57694c9b8aaf9ffa6f29474d2",
+			"bytes": 6351,
 			"contentType": "application/javascript"
 		}
 	]

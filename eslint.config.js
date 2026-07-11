@@ -7,7 +7,7 @@ export default [
 	},
 	js.configs.recommended,
 	{
-		files: ["dist/**/*.js"],
+		files: ["dist/**/*.js", "worker.test.js"],
 		languageOptions: {
 			ecmaVersion: 2024,
 			sourceType: "module",
