@@ -2,7 +2,7 @@
 
 First-party Bonobo workspace plugin for generating Markdown descriptions for uploaded images.
 
-On `files.upload.completed` for `image/jpeg`, `image/png`, `image/webp`, or `image/gif`, the worker requests a presigned download URL for the uploaded image (`POST /api/v1/files/download-url` with the event's `source.fileNodeId`), asks OpenAI `gpt-4.1-mini` to describe it (main subjects, visible text, colors, layout), and writes `<name>.description.md` next to the upload (`POST /api/v1/files/write` with the absolute sibling path built from `source.path`).
+On `files.upload.completed` for `image/jpeg`, `image/png`, `image/webp`, or `image/gif`, the worker requests a presigned download URL for the uploaded image (`POST /api/v1/files/download-urls` with `[source.fileNodeId]`), asks OpenAI `gpt-4.1-mini` to describe it (main subjects, visible text, colors, layout), and writes `<name>.description.md` next to the upload (`POST /api/v1/files/write` with the absolute sibling path built from `source.path`).
 
 ## Secrets
 

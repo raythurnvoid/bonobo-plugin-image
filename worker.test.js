@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { isSupportedImageContentType } from "./dist/backend/worker.js";
 
 const HOST_API_ORIGIN = "https://host.test";
-const DOWNLOAD_URL_API = `${HOST_API_ORIGIN}/api/v1/files/download-url`;
+const DOWNLOAD_URL_API = `${HOST_API_ORIGIN}/api/v1/files/download-urls`;
 const FILES_WRITE_API = `${HOST_API_ORIGIN}/api/v1/files/write`;
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const SIGNED_SOURCE_URL = "https://r2.test/photo.png?signed=1";
@@ -57,7 +57,11 @@ function stubFetch(overrides = {}) {
 	const fetchMock = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
 		if (url === DOWNLOAD_URL_API) {
 			downloadUrlCalls.push(capturedCall(init));
-			return Response.json({ fileNodeId: "node-1", url: SIGNED_SOURCE_URL, expiresAt: Date.now() + 900_000 });
+			return Response.json({
+				items: [{ fileNodeId: "node-1", url: SIGNED_SOURCE_URL, expiresAt: Date.now() + 900_000 }],
+				errors: [],
+				truncated: false,
+			});
 		}
 		if (url === FILES_WRITE_API) {
 			const call = capturedCall(init);
@@ -149,7 +153,7 @@ describe("worker.fetch", () => {
 
 		expect(downloadUrlCalls).toHaveLength(1);
 		expect(downloadUrlCalls[0].headers.Authorization).toBe("Bearer run-token");
-		expect(downloadUrlCalls[0].body).toEqual({ fileNodeId: "node-1", expiresInSeconds: 900 });
+		expect(downloadUrlCalls[0].body).toEqual({ fileNodeIds: ["node-1"], expiresInSeconds: 900 });
 
 		expect(openaiCalls).toHaveLength(1);
 		expect(openaiCalls[0].headers.Authorization).toBe("Bearer sk-test");
