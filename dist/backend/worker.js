@@ -201,6 +201,14 @@ export default {
 		}
 
 		const openaiKey = await requireSecret(env, "OPENAI_API_KEY");
+
+		// Absolute sibling of the upload: /folder/photo.png -> /folder/photo.png.description.md.
+		const path = `${source.path}.description.md`;
+		// Create the output file empty right away — after the secret is known to exist, so a
+		// missing secret still fails before any file appears — and let the user see where the
+		// description will land while the model runs. The write below fills this same node in place.
+		await hostFetch(env, "/api/v1/files/touch", { paths: [path] });
+
 		const sourceUrl = await sourceDownloadUrl(env, source.fileNodeId);
 		const description = await openaiDescribeImage({
 			apiKey: openaiKey,
@@ -208,8 +216,6 @@ export default {
 			imageUrl: sourceUrl,
 		});
 
-		// Absolute sibling of the upload: /folder/photo.png -> /folder/photo.png.description.md.
-		const path = `${source.path}.description.md`;
 		await hostFetch(env, "/api/v1/files/write", {
 			path,
 			content: `# Image description: ${source.name}\n\n${description}`,
