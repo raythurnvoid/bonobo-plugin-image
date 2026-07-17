@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { isSupportedImageContentType } from "./dist/backend/worker.js";
 
 const HOST_API_ORIGIN = "https://host.test";
+const ACTIVITIES_START_API = `${HOST_API_ORIGIN}/api/v1/activities/start`;
 const DOWNLOAD_URL_API = `${HOST_API_ORIGIN}/api/v1/files/download-urls`;
+const FILES_TOUCH_API = `${HOST_API_ORIGIN}/api/v1/files/touch`;
 const FILES_WRITE_API = `${HOST_API_ORIGIN}/api/v1/files/write`;
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const SIGNED_SOURCE_URL = "https://r2.test/photo.png?signed=1";
@@ -49,12 +51,27 @@ function capturedCall(init) {
 /** @param {{ openai?: () => Response }} [overrides] */
 function stubFetch(overrides = {}) {
 	/** @type {ReturnType<typeof capturedCall>[]} */
+	const activityCalls = [];
+	/** @type {ReturnType<typeof capturedCall>[]} */
 	const downloadUrlCalls = [];
+	/** @type {ReturnType<typeof capturedCall>[]} */
+	const touchCalls = [];
 	/** @type {ReturnType<typeof capturedCall>[]} */
 	const writeCalls = [];
 	/** @type {ReturnType<typeof capturedCall>[]} */
 	const openaiCalls = [];
 	const fetchMock = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ init) => {
+		if (url === ACTIVITIES_START_API) {
+			activityCalls.push(capturedCall(init));
+			return Response.json({ activityId: "activity-1" });
+		}
+		if (url === FILES_TOUCH_API) {
+			const call = capturedCall(init);
+			touchCalls.push(call);
+			return Response.json({
+				files: call.body.paths.map((/** @type {string} */ path) => ({ path, nodeId: "node-2", created: true })),
+			});
+		}
 		if (url === DOWNLOAD_URL_API) {
 			downloadUrlCalls.push(capturedCall(init));
 			return Response.json({
@@ -77,7 +94,7 @@ function stubFetch(overrides = {}) {
 		throw new Error(`Unexpected fetch URL: ${url}`);
 	});
 	vi.stubGlobal("fetch", fetchMock);
-	return { fetchMock, downloadUrlCalls, writeCalls, openaiCalls };
+	return { fetchMock, activityCalls, downloadUrlCalls, touchCalls, writeCalls, openaiCalls };
 }
 
 /**
@@ -120,12 +137,16 @@ describe("worker.fetch", () => {
 	});
 
 	it("fails without writing when the OPENAI_API_KEY secret is missing", async () => {
-		const { writeCalls } = stubFetch();
+		const { activityCalls, touchCalls, writeCalls } = stubFetch();
 		const env = stubEnv({ secretGet: vi.fn(async () => null) });
 
 		await expect(runWorker(uploadRequest({ name: "photo.png", contentType: "image/png" }), env)).rejects.toThrow(
 			"OPENAI_API_KEY secret is not configured",
 		);
+		// The activity starts before the secret reads so the failure shows in the feed,
+		// but no file may appear.
+		expect(activityCalls).toHaveLength(1);
+		expect(touchCalls).toHaveLength(0);
 		expect(writeCalls).toHaveLength(0);
 	});
 
@@ -143,13 +164,20 @@ describe("worker.fetch", () => {
 	});
 
 	it("requests the source download URL, describes it with OpenAI, and writes the sibling description", async () => {
-		const { downloadUrlCalls, writeCalls, openaiCalls } = stubFetch();
+		const { activityCalls, downloadUrlCalls, touchCalls, writeCalls, openaiCalls } = stubFetch();
 		const env = stubEnv();
 
 		const response = await runWorker(uploadRequest({ name: "photo.png", contentType: "image/png" }), env);
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ ok: true, files: ["/uploads/photo.png.description.md"] });
+
+		expect(activityCalls).toHaveLength(1);
+		expect(activityCalls[0].headers.Authorization).toBe("Bearer run-token");
+		expect(activityCalls[0].body).toEqual({ title: "Describing photo.png", timeoutMs: 2 * 60 * 1000 });
+
+		expect(touchCalls).toHaveLength(1);
+		expect(touchCalls[0].body).toEqual({ paths: ["/uploads/photo.png.description.md"] });
 
 		expect(downloadUrlCalls).toHaveLength(1);
 		expect(downloadUrlCalls[0].headers.Authorization).toBe("Bearer run-token");

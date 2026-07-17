@@ -4,6 +4,9 @@ const OPENAI_DESCRIPTION_MODEL = "gpt-4.1-mini";
 const OPENAI_MAX_OUTPUT_TOKENS = 900;
 const OPENAI_RETRY_ATTEMPTS = 2;
 const OPENAI_RETRY_DELAY_MS = 1000;
+// Predicted run duration for the activity feed: one OpenAI description call plus the touch and
+// write usually finish well within 2 minutes.
+const ACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
 
 const IMAGE_SYSTEM_PROMPT =
 	"Describe uploaded images for an app file tree. Write useful, concrete Markdown for a reader who cannot see the image. Cover the main subjects, any visible text, the colors, and the layout, and call out uncertainty. Keep the description under 300 words. Return raw Markdown without wrapping it in a code fence.";
@@ -199,6 +202,14 @@ export default {
 		if (!isSupportedImageContentType(source.contentType)) {
 			return skipped();
 		}
+
+		// Opt into the workspace activity feed first, so users can watch the run — including a
+		// failure while reading secrets. The host links every file this run touches or writes to
+		// the activity and closes it with the run's outcome.
+		await hostFetch(env, "/api/v1/activities/start", {
+			title: `Describing ${source.name}`,
+			timeoutMs: ACTIVITY_TIMEOUT_MS,
+		});
 
 		const openaiKey = await requireSecret(env, "OPENAI_API_KEY");
 
