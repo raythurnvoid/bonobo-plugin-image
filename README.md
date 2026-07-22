@@ -4,6 +4,10 @@ First-party Bonobo workspace plugin for generating Markdown descriptions for upl
 
 On `files.upload.completed` for `image/jpeg`, `image/png`, `image/webp`, or `image/gif`, the worker requests a presigned download URL for the uploaded image (`POST /api/v1/files/download-urls` with `[source.fileNodeId]`), asks OpenAI `gpt-4.1-mini` to describe it (main subjects, visible text, colors, layout), and writes `<name>.description.md` next to the upload (`POST /api/v1/files/write` with the absolute sibling path built from `source.path`).
 
+## Configuration
+
+Each installation can edit the manifest-defined YAML. `triggers.files.upload.completed.folders` lists the absolute folders that start automatic image runs. A folder includes its descendants. `/` matches every folder, and an empty list disables automatic runs. Manual runs ignore this filter.
+
 ## Secrets
 
 - `OPENAI_API_KEY` (required). By default the publisher secret is used, so the publisher's OpenAI account processes the images of every workspace that installs the plugin. A workspace can shadow it with an installation secret of the same name to process its images on its own OpenAI account.
