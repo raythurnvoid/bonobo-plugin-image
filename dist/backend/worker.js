@@ -7,6 +7,8 @@ const OPENAI_RETRY_DELAY_MS = 1000;
 // Predicted run duration for the activity feed: one OpenAI description call plus the touch and
 // write usually finish well within 2 minutes.
 const ACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
+// OpenAI does not publish a size limit for one image. 20 MB stays safely inside what it accepts.
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 const IMAGE_SYSTEM_PROMPT =
 	"Describe uploaded images for an app file tree. Write useful, concrete Markdown for a reader who cannot see the image. Cover the main subjects, any visible text, the colors, and the layout, and call out uncertainty. Keep the description under 300 words. Return raw Markdown without wrapping it in a code fence.";
@@ -58,12 +60,18 @@ function getSource(event) {
 		typeof source !== "object" ||
 		typeof source.fileNodeId !== "string" ||
 		typeof source.name !== "string" ||
-		typeof source.path !== "string"
+		typeof source.path !== "string" ||
+		typeof source.size !== "number"
 	) {
 		return null;
 	}
 
 	return source;
+}
+
+/** @param {number} bytes */
+function formatMegabytes(bytes) {
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -210,6 +218,14 @@ export default {
 			title: `Describing ${source.name}`,
 			timeoutMs: ACTIVITY_TIMEOUT_MS,
 		});
+
+		// Refuse a file that is too big before reading the secret, creating the output file, or calling
+		// OpenAI. Then the refusal costs nothing and leaves no empty file behind.
+		if (source.size > MAX_IMAGE_BYTES) {
+			throw new Error(
+				`${source.name} is ${formatMegabytes(source.size)}. Images can be at most 20 MB for a description. Make the image smaller, then upload it again.`,
+			);
+		}
 
 		const openaiKey = await requireSecret(env, "OPENAI_API_KEY");
 

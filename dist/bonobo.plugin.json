@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"name": "image",
 	"displayName": "Image",
-	"version": "0.3.4",
+	"version": "0.3.5",
 	"description": "Generates Markdown descriptions for uploaded images.",
 	"compatibility": {
 		"bonoboPluginRuntime": "1"
@@ -36,8 +36,8 @@
 	"files": [
 		{
 			"path": "dist/backend/worker.js",
-			"sha256": "sha256:7cec71fc7e080972badb77f72e4c08a8896998e4916ace52b2aed16c61fcb8e7",
-			"bytes": 7300,
+			"sha256": "sha256:e52e17a40b8f84e0bddfc099e29abfe6a6248230288bbf8591193e9937deccc3",
+			"bytes": 7992,
 			"contentType": "application/javascript"
 		}
 	]

@@ -10,7 +10,7 @@ const FILES_WRITE_API = `${HOST_API_ORIGIN}/api/v1/files/write`;
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const SIGNED_SOURCE_URL = "https://r2.test/photo.png?signed=1";
 
-/** @param {{ name: string, contentType: string }} source */
+/** @param {{ name: string, contentType: string, size?: number }} source */
 function uploadRequest(source) {
 	return new Request("https://plugin.test/event", {
 		method: "POST",
@@ -148,6 +148,22 @@ describe("worker.fetch", () => {
 		expect(activityCalls).toHaveLength(1);
 		expect(touchCalls).toHaveLength(0);
 		expect(writeCalls).toHaveLength(0);
+	});
+
+	it("refuses an image over 20 MB before reading the secret, creating a file, or calling OpenAI", async () => {
+		const { activityCalls, touchCalls, writeCalls, openaiCalls } = stubFetch();
+		const env = stubEnv();
+
+		await expect(
+			runWorker(uploadRequest({ name: "photo.png", contentType: "image/png", size: 21 * 1024 * 1024 }), env),
+		).rejects.toThrow(
+			"photo.png is 21.0 MB. Images can be at most 20 MB for a description. Make the image smaller, then upload it again.",
+		);
+		expect(activityCalls).toHaveLength(1);
+		expect(env.BONOBO.secrets.get).not.toHaveBeenCalled();
+		expect(touchCalls).toHaveLength(0);
+		expect(writeCalls).toHaveLength(0);
+		expect(openaiCalls).toHaveLength(0);
 	});
 
 	it("retries once on OpenAI 500 and then fails with the status only", async () => {
