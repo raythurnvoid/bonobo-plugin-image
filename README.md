@@ -4,6 +4,8 @@ First-party Bonobo workspace plugin for generating Markdown descriptions for upl
 
 On `files.upload.completed` for `image/jpeg`, `image/png`, `image/webp`, or `image/gif`, the worker requests a presigned download URL for the uploaded image (`POST /api/v1/files/download-urls` with `[source.fileNodeId]`), asks OpenAI `gpt-4.1-mini` to describe it (main subjects, visible text, colors, layout), and writes `<name>.description.md` next to the upload (`POST /api/v1/files/write` with the absolute sibling path built from `source.path`).
 
+Images over 20 MB are refused before any work. The run fails with a message that names the file and its size, and no description file is created. The Files sidebar already shrinks images over 2048 px before upload, so this limit mostly matters for uploads through the public API.
+
 ## Configuration
 
 Each installation can edit the manifest-defined YAML. `triggers.files.upload.completed.folders` lists the absolute folders that start automatic image runs. A folder includes its descendants. `/` matches every folder, and an empty list disables automatic runs. Manual runs ignore this filter.
